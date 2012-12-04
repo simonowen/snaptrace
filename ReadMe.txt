@@ -27,7 +27,7 @@ Or if you have the CMake build system installed, use:
 Running
 -------
 
-  Usage: %s [-v] [-u] [-2] [-r] [-s] <snapshot>
+  Usage: snaptrace [-v] [-u] [-2] [-r] [-s] <snapshot>
 
     -v   Verbose output with more detail about tracing
     -vv  Extra verbose output for every location visited
