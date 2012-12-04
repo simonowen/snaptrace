@@ -90,10 +90,10 @@ Warnings:
    Tracing has likely escaped into unused memory!
 
  "*** suspicious ld r,r ***"
-   An inert assignment with the same source and target register has been.
+   An inert assignment with the same source and target register was found.
    Tracing has likely escaped and executing data!
 
-The last 2 messages may indicate a problem in snaptrace, which needs fixing.
+The last 2 messages may indicate a problem in snaptrace that needs fixing.
 If you encounter either of them, please send me the snapshot(s) for analysis.
 
 
