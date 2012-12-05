@@ -194,7 +194,7 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                 {
                     // Blacklist recognised data accesses
                     if ((op == 0xe1 && (mem[pc] & 0xc7) == 0x46) || // pop hl ; ld r,(hl)
-                        (op == 0xd1 &&  mem[pc]         == 0x1a) || // pop de ; ld a,(hl)
+                        (op == 0xd1 &&  mem[pc]         == 0x1a) || // pop de ; ld a,(de)
                         (op == 0xc1 &&  mem[pc]         == 0x0a))   // pop bc ; ld a,(bc)
                     {
                         if (pc >= 0x4000) printf("%04X: return address data access\n", pc-1);
