@@ -259,6 +259,15 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
     return true;
 }
 
+// Trace a given address, if it looks safe to do
+void trace_safe (WORD pc, WORD sp)
+{
+    if (mem[pc] == 0x00 || mem[pc] == 0xff)
+        printf(" skipped due to suspicious code start (%02X)\n", mem[pc]);
+    else
+        trace_addr(pc, sp, sp, false);
+}
+
 void trace_usr ()
 {
     // Look up BASIC location in PROG sysvar, and check for sensible values
@@ -313,7 +322,7 @@ void trace_usr ()
                         printf("Found USR VAL$ %u (%04X) on line %u\n", addr, addr, line);
 
                         mark = 2; // red
-                        trace_addr(addr, reg_sp, reg_sp, false);
+                        trace_safe(addr, reg_sp);
                     }
                 }
                 else if (isdigit(mem[i+1]))
@@ -327,7 +336,7 @@ void trace_usr ()
                         printf("Found USR %u (%04X) on line %u\n", addr, addr, line);
 
                         mark = 2; // red
-                        trace_addr(addr, reg_sp, reg_sp, false);
+                        trace_safe(addr, reg_sp);
                     }
                 }
             }
@@ -348,7 +357,7 @@ void trace_im2 (BYTE i)
         printf("Tracing IM 2 from %04X\n", im_addr);
 
         mark = 1; // blue
-        trace_addr(im_addr, reg_sp, reg_sp, false);
+        trace_safe(im_addr, reg_sp);
     }
 }
 
