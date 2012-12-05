@@ -7,6 +7,8 @@
 #include <png.h>
 #include "libspectrum.h"
 
+#define MAX_NOP_RUN 10  // Allow up to 10 NOPs before we suspect we're in free memory
+
 typedef unsigned char BYTE;
 typedef unsigned short WORD;
 
@@ -84,9 +86,9 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
 
 
             case 0x00: // nop
-                if (pc-1 >= 0x4000 && mem[pc] == 0x00 && mem[pc+1] == 0x00 && mem[pc+2] == 0x00)
+                if (pc-1 >= 0x4000 && pc < (0xffff-MAX_NOP_RUN) && !memcmp(mem+pc, mem+pc+1, MAX_NOP_RUN-1))
                 {
-                    printf("%04X: *** suspicious block of 4+ NOPs ***\n", pc-1);
+                    printf("%04X: *** suspicious block of %d+ NOPs ***\n", pc-1, MAX_NOP_RUN);
                     return true;
                 }
                 break;
