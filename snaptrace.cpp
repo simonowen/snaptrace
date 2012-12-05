@@ -366,7 +366,21 @@ int read_snapshot (const char *filename)
             int error = libspectrum_snap_read(snap, buf, len, LIBSPECTRUM_ID_UNKNOWN, filename);
             if (!error)
             {
-                if (libspectrum_snap_machine(snap) == LIBSPECTRUM_MACHINE_48)
+                // Extract machine details from the snapshot
+                libspectrum_machine machine = libspectrum_snap_machine(snap);
+                int caps = libspectrum_machine_capabilities(machine);
+                libspectrum_byte paging128k = libspectrum_snap_out_128_memoryport(snap);
+                libspectrum_byte pagingplus3 = libspectrum_snap_out_plus3_memoryport(snap);
+
+                // Determine conditions related to 48K compatibility
+                bool is48k = (machine == LIBSPECTRUM_MACHINE_48);
+                bool is128k = (caps & LIBSPECTRUM_MACHINE_CAPABILITY_128_MEMORY) != 0;
+                bool isplus2a3 = (caps & LIBSPECTRUM_MACHINE_CAPABILITY_PLUS3_MEMORY) != 0;
+                bool is128kas48k = (paging128k & 0x17) == 0x10;
+                bool isplus3as48k = (pagingplus3 & 0x01) == 0;
+
+                // 48K, or 128K with 48K paging, and if it's a +2A/+3 it must be normal paging mode
+                if (is48k || (is128k && is128kas48k && (!isplus2a3 && isplus3as48k)))
                 {
                     // Read 48K RAM banks
                     memcpy(mem+0x4000, libspectrum_snap_pages(snap, 5), 0x4000);
