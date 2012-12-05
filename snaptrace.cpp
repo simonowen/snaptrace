@@ -13,6 +13,8 @@ typedef unsigned short WORD;
 WORD reg_pc, reg_sp;    // PC and SP from snapshot
 BYTE reg_i, reg_im;     // I and interrupt mode from snapshot
 
+BYTE poss_i, poss_im;   // possible I and IM values in the code
+
 BYTE mem[0x10000];      // 64K address space, first 16K ROM
 BYTE seen[0x10000];     // code locations visited
 BYTE nocall[0x10000];   // blacklisted calls due to stack manipulation
@@ -63,6 +65,19 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                     case 0x4b: case 0x5b: case 0x6b: // ld rr,(nn)
                         seen[pc++] |= mark;
                         seen[pc++] |= mark;
+                        break;
+
+                    case 0x47: // ld i,a
+                        if (poss_i < 0x40 && mem[pc-4] == 0x3e/*ld a,n*/)
+                        {
+                            poss_i = mem[pc-3];
+                            if (verbose > 1) printf(" LD A,%02X ; LD I,A\n", pc-4, poss_i);
+                        }
+                        break;
+
+                    case 0x5e: // im 2
+                        if (verbose > 1) printf(" IM 2\n");
+                        poss_im = 2;
                         break;
                 }
                 break;
@@ -322,14 +337,19 @@ void trace_usr ()
     }
 }
 
-void trace_im2 ()
+void trace_im2 (BYTE i)
 {
-    WORD im_table = (reg_i << 8) | 0xff;
-    WORD im_addr = (mem[im_table+1] << 8) | mem[im_table+0];
-    printf("Tracing IM2 from %04X\n", im_addr);
+    WORD im_table = (i << 8) | 0x00;
+    WORD im_addr = (mem[im_table+255] << 8) | mem[im_table+256];
 
-    mark = 1; // blue
-    trace_addr(im_addr, reg_sp, reg_sp, false);
+    // Sanity check to support runtime IM 2 detection
+    if (i >= 0x40 && im_addr >= 0x4000 && (im_addr >> 8) == (im_addr & 0xff))
+    {
+        printf("Tracing IM 2 from %04X\n", im_addr);
+
+        mark = 1; // blue
+        trace_addr(im_addr, reg_sp, reg_sp, false);
+    }
 }
 
 
@@ -490,9 +510,11 @@ int main (int argc, char *argv[])
     if (usrtrace || !memcmp(seen+0x4000, seen+0x4001, 0xbfff))
         trace_usr();
 
-    // Trace from IM2 handler if set
+    // Trace IM 2 handler if active, or setup detected in code
     if (im2trace && reg_im == 2)
-        trace_im2();
+        trace_im2(reg_i);
+    else if (im2trace && poss_im == 2)
+        trace_im2(poss_i);
 
     if (pngsave)
         write_png(file);
