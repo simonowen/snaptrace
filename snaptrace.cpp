@@ -61,6 +61,16 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
 
                 switch (op)
                 {
+                    case 0x45: case 0x55: case 0x65: case 0x75: // retn
+                    case 0x4d: case 0x5d: case 0x6d: case 0x7d: // reti
+                        if (toplevel)
+                        {
+                            addr = (mem[sp+1] << 8) | mem[sp];
+                            if (verbose) printf("%04X: reti/retn (top-level)\n", pc-2);
+                            trace_addr(addr, sp+2, sp+2, toplevel);
+                        }
+                        return true;
+
                     case 0x7b: // ld sp,(nn)
                         basesp = sp;
                     case 0x43: case 0x53: case 0x63: case 0x73: // ld (nn),rr
