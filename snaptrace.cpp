@@ -219,16 +219,28 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
 
                 if (!toplevel && sp == basesp)
                 {
-                    // Blacklist recognised data accesses
-                    if ((op == 0xe1 && (mem[pc] & 0xc7) == 0x46) || // pop hl ; ld r,(hl)
-                        (op == 0xd1 &&  mem[pc]         == 0x1a) || // pop de ; ld a,(de)
-                        (op == 0xc1 &&  mem[pc]         == 0x0a))   // pop bc ; ld a,(bc)
+                    // Return pop followed by data access?
+                    if (!ddfd &&
+                        ((op == 0xe1 && (mem[pc] & 0xc7) == 0x46) || // pop hl ; ld r,(hl)
+                         (op == 0xd1 &&  mem[pc]         == 0x1a) || // pop de ; ld a,(de)
+                         (op == 0xc1 &&  mem[pc]         == 0x0a)))  // pop bc ; ld a,(bc)
                     {
-                        if (pc >= 0x4000) printf("%04X: return address data access\n", pc-1);
+                        if (pc >= 0x4000) printf("%04X: return address data access\n", pc);
                         return false;
                     }
+                    else if (ddfd && op == 0xe1) // pop ix/iy
+                    {
+                        for (WORD w = 0 ; w < 10 ; w++) // access must be within ~10 bytes
+                        {
+                            if (mem[pc+w] == mem[pc-2] && (mem[pc+w+1] & 0xc7) == 0x46 && mem[pc+w+2] <= 0x01) // ld r,(ix/iy+0/1)
+                            {
+                                if (pc >= 0x4000) printf("%04X: return address data access\n", pc+w);
+                                return false;
+                            }
+                        }
+                    }
 
-                    if (pc >= 0x4000) printf("%04X: return address popped\n", pc-1);
+                    if (pc >= 0x4000) printf("%04X: return address popped\n", pc-1-ddfd);
                     return true;
                 }
 
