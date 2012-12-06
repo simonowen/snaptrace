@@ -21,6 +21,7 @@ BYTE mem[0x10000];      // 64K address space, first 16K ROM
 BYTE seen[0x10000];     // code locations visited
 BYTE nocall[0x10000];   // blacklisted calls due to stack manipulation
 BYTE mark;              // current marker colour bit to combine into seen[pc]
+int basiclen;           // count of bytes in BASIC listing
 
 int savemsb = 0x40;     // 0x40 to save 48K RAM, 0x00 to save full 64K
 int verbose = 0;        // 0-2 for tracing detail levels
@@ -312,13 +313,6 @@ void trace_usr ()
                 printf("BASIC line %u len %u\n", line, len);
 
             int i;
-            if (verbose > 1)
-            {
-                for (i = 0 ; i < len ; i++)
-                    printf("%02X ", mem[prog+i]);
-                printf("\n");
-            }
-
             for (i = prog ; i < prog+len-1 ; i++)
             {
                 // 5-byte number format?
@@ -365,6 +359,12 @@ void trace_usr ()
                 }
             }
 
+            // Mark the BASIC line, including 4-byte header
+            mark = 7; // white
+            for (i = 0 ; i < 4+len ; i++)
+                seen[prog-4+i] |= mark;
+
+            basiclen += 4+len;
             prog += len;
         }
     }
@@ -556,7 +556,7 @@ int main (int argc, char *argv[])
     for (size_t i = 0x4000 ; i < sizeof(seen) ; i++)
         n += seen[i] != 0;
 
-    printf("Traced %d code bytes in RAM.\n", n);
+    printf("Traced %d Z80 bytes, BASIC length %d.\n", n-basiclen, basiclen);
 
     return 0;
 }
