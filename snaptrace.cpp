@@ -36,6 +36,13 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
     BYTE op;
     bool ddfd = false;
 
+    // Continuing beyond ROM loader is unsafe as it may rely on loaded code
+    if (pc == 0x0556)
+    {
+        printf("%04X: stopping at ROM loader\n", pc);
+        return false;
+    }
+
     // Loop until we reach a previously visited location
     while (!(seen[pc] & mark))
     {
