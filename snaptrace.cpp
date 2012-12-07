@@ -36,8 +36,8 @@ int basiclen;           // count of bytes in BASIC listing
 
 int savemsb = 0x40;     // 0x40 to save 48K RAM, 0x00 to save full 64K
 int verbose = 0;        // 0-2 for tracing detail levels
-bool usrtrace = true;   // trace USR statements found in BASIC (enabled, -u to disable)
-bool im2trace = true;   // trace IM 2 interrupt handler (enabled, -2 to disable)
+bool basictrace = true; // trace USR statements found in BASIC (enabled, -b to disable)
+bool im2trace = true;   // trace interrupt handler if IM 2 active (enabled, -i to disable)
 bool pngsave = true;    // save output as PNG image (enabled, -s to disable)
 
 
@@ -577,9 +577,9 @@ int main (int argc, char *argv[])
             verbose++;
         else if (!strcmp(argv[i], "-vv")) // more verbose
             verbose += 2;
-        else if (!strcmp(argv[i], "-u")) // skip USR trace
-            usrtrace = false;
-        else if (!strcmp(argv[i], "-2")) // skip IM 2 trace
+        else if (!strcmp(argv[i], "-b")) // skip BASIC scan for USRs
+            basictrace = false;
+        else if (!strcmp(argv[i], "-i")) // skip IM 2 trace
             im2trace = false;
         else if (!strcmp(argv[i], "-r")) // include ROM in output image
             savemsb = 0x00;
@@ -595,7 +595,7 @@ int main (int argc, char *argv[])
 
     if (!file)
     {
-        fprintf(stderr, "Usage: %s [-v] [-u] [-2] [-r] [-s] <snapshot>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-v] [-b] [-i] [-r] [-s] <snapshot>\n", argv[0]);
         return 1;
     }
     else if (!read_rom("48.rom") && !read_rom(ROM_DIR "48.rom"))
@@ -610,7 +610,7 @@ int main (int argc, char *argv[])
     trace_addr(reg_pc, reg_sp, reg_sp, true);
 
     // Trace using USR statements in BASIC and the current editing line
-    if (usrtrace)
+    if (basictrace)
     {
         trace_prog();
         trace_eline();
@@ -629,6 +629,10 @@ int main (int argc, char *argv[])
     for (size_t i = 0x4000 ; i < sizeof(seen) ; i++)
         n += seen[i] != 0;
 
-    printf("Traced %d Z80 bytes, BASIC length %d.\n", n-basiclen, basiclen);
+    if (basictrace)
+        printf("Traced %d Z80 bytes, BASIC length %d.\n", n-basiclen, basiclen);
+    else
+        printf("Traced %d Z80 bytes.\n", n);
+
     return 0;
 }
