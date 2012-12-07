@@ -9,6 +9,11 @@
 
 #define MAX_NOP_RUN 10  // Allow up to 10 NOPs before we suspect we're in free memory
 
+#define PROG   0x5c53   // contains address of BASIC program
+#define VARS   0x5c4b   // contains address of BASIC variables
+#define E_LINE 0x5c59   // contains address being typed in
+#define STKEND 0x5c65   // contains start address of spare space
+
 typedef unsigned char BYTE;
 typedef unsigned short WORD;
 
@@ -25,7 +30,7 @@ int basiclen;           // count of bytes in BASIC listing
 
 int savemsb = 0x40;     // 0x40 to save 48K RAM, 0x00 to save full 64K
 int verbose = 0;        // 0-2 for tracing detail levels
-bool usrtrace = false;  // trace USR statements found in BASIC (disabled, -u to enable)
+bool usrtrace = true;   // trace USR statements found in BASIC (enabled, -u to disable)
 bool im2trace = true;   // trace IM 2 interrupt handler (enabled, -2 to disable)
 bool pngsave = true;    // save output as PNG image (enabled, -s to disable)
 
@@ -116,7 +121,7 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
 
                 if (sp == basesp) // pointing to return adddress?
                 {
-                    if (pc >= 0x4000) printf("%04X: ex (sp) on return address\n", pc-1);
+                    if (pc >= 0x4000) printf("%04X: stopping at ex (sp) on return address\n", pc-1);
                     return false;
                 }
                 break;
@@ -185,7 +190,7 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                 // Recursive call to trace CALL
                 if (!trace_addr(addr, sp-2, sp-2, false))
                 {
-                    if (verbose) printf("%04X: data following call to %04X\n", pc, addr);
+                    if (pc >= 0x4000) printf("%04X: blacklisted call to %04X\n", pc, addr);
                     nocall[addr] = 1;
                     return true;
                 }
@@ -233,7 +238,7 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                          (op == 0xd1 &&  mem[pc]         == 0x1a) || // pop de ; ld a,(de)
                          (op == 0xc1 &&  mem[pc]         == 0x0a)))  // pop bc ; ld a,(bc)
                     {
-                        if (pc >= 0x4000) printf("%04X: return address data access\n", pc);
+                        if (pc >= 0x4000) printf("%04X: stopping at return address data access\n", pc);
                         return false;
                     }
                     else if (ddfd && op == 0xe1) // pop ix/iy
@@ -242,7 +247,7 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                         {
                             if (mem[pc+w] == mem[pc-2] && (mem[pc+w+1] & 0xc7) == 0x46 && mem[pc+w+2] <= 0x01) // ld r,(ix/iy+0/1)
                             {
-                                if (pc >= 0x4000) printf("%04X: return address data access\n", pc+w);
+                                if (pc >= 0x4000) printf("%04X: stopping at return address data access\n", pc+w);
                                 return false;
                             }
                         }
@@ -300,82 +305,129 @@ void trace_safe (WORD pc, WORD sp)
         trace_addr(pc, sp, sp, false);
 }
 
-void trace_usr ()
+
+void trace_line (WORD addr, int len, int line)
 {
-    // Look up BASIC location in PROG sysvar, and check for sensible values
-    WORD prog = (mem[23636] << 8) | mem[23635];
-    if (prog >= 23755 && prog <= 23850)
+    int i;
+    bool inquotes = false;
+
+    if (verbose)
+        printf("%04X: BASIC line %u len %u\n", addr, line, len);
+
+    for (i = addr ; i < addr+len ; i++)
     {
-        while (true)
+        // Track strings, so UDGs can be ignored
+        if (mem[i] == '"')
+        {
+            inquotes = !inquotes;
+            continue;
+        }
+
+        if (inquotes)
+            continue;
+
+        // Return or end marker?
+        else if (mem[i] == 0x0d || mem[i] == 0x80)
+            break;
+
+        // 5-byte number format?
+        else if (mem[i] == 0x0e)
+        {
+            i += 5;
+            continue;
+        }
+        // Continue search for anything but USR
+        else if (mem[i] != 0xc0)
+            continue;
+
+        // VAL$ with string?
+        if (mem[i+1] == 0xb0 && mem[i+2] == '"')
+        {
+            WORD addr = 0;
+
+            // Convert string digits to number
+            for (i+=3 ; isdigit(mem[i]) ; i++)
+                addr = addr*10 + mem[i]-'0';
+
+            // Check for end of string
+            if (mem[i] == '"')
+            {
+                if (line < 0)
+                    printf("Found USR VAL$ %u (%04X) on edit line\n", addr, addr);
+                else
+                    printf("Found USR VAL$ %u (%04X) on line %u\n", addr, addr, line);
+
+                mark = 2; // red
+                trace_safe(addr, reg_sp);
+            }
+        }
+        else if (isdigit(mem[i+1]))
+        {
+            // Skip the string of digits, which can't be trusted
+            for (i++ ; isdigit(mem[i]) ; i++);
+
+            // 5-byte number format with an integer?
+            if (mem[i] == 0x0e && mem[i+1] == 0 && mem[i+2] == 0 && mem[i+5] == 0)
+            {
+                WORD addr = (mem[i+4] << 8) | mem[i+3];
+                if (line < 0)
+                    printf("Found USR %u (%04X) on edit line\n", addr, addr);
+                else
+                    printf("Found USR %u (%04X) on line %u\n", addr, addr, line);
+
+                mark = 2; // red
+                trace_safe(addr, reg_sp);
+
+                // Step back so the number token is seen and skipped
+                i--;
+            }
+        }
+    }
+
+    // Include the 4-byte header on normal program lines
+    if (line >= 0) addr -= 4;
+    basiclen += i-addr+1;
+
+    mark = 7; // white
+    while (addr <= i)
+        seen[addr++] |= mark;
+}
+
+void trace_prog ()
+{
+    // Look up BASIC program and variables addresses
+    WORD prog = (mem[PROG+1] << 8) | mem[PROG];
+    WORD vars = (mem[VARS+1] << 8) | mem[VARS];
+
+    // Check the values are sensible before we use them (terminator before prog, CR before vars)
+    if (prog && vars && (vars > prog) && mem[prog-1] == 0x80 && mem[vars-1] == 0x0d)
+    {
+        while (mem[prog] < 0x40 && prog < vars)
         {
             WORD line = (mem[prog] << 8) | mem[prog+1];
             WORD len = (mem[prog+3] << 8) | mem[prog+2];
             prog += 4;
 
-            // Sanity check line number and length
-            if (line > 10000 || len == 0 || len > 0x4000)
-                break;
+            // Trace USRs on the line
+            trace_line(prog, len, line);
 
-            if (verbose)
-                printf("BASIC line %u len %u\n", line, len);
-
-            int i;
-            for (i = prog ; i < prog+len-1 ; i++)
-            {
-                // 5-byte number format?
-                if (mem[i] == 14)
-                {
-                    i += 5;
-                    continue;
-                }
-                // Continue search for anything but USR
-                else if (mem[i] != 0xc0)
-                    continue;
-
-                // VAL$ with string?
-                if (mem[i+1] == 0xb0 && mem[i+2] == '"')
-                {
-                    WORD addr = 0;
-
-                    // Convert string digits to number
-                    for (i+=3 ; isdigit(mem[i]) ; i++)
-                        addr = addr*10 + mem[i]-'0';
-
-                    // Check for end of string
-                    if (mem[i] == '"')
-                    {
-                        printf("Found USR VAL$ %u (%04X) on line %u\n", addr, addr, line);
-
-                        mark = 2; // red
-                        trace_safe(addr, reg_sp);
-                    }
-                }
-                else if (isdigit(mem[i+1]))
-                {
-                    for (i++ ; isdigit(mem[i]) ; i++);
-
-                    // 5-byte number format with an integer?
-                    if (mem[i] == 14 && mem[i+1] == 0 && mem[i+2] == 0 && mem[i+5] == 0)
-                    {
-                        WORD addr = (mem[i+4] << 8) | mem[i+3];
-                        printf("Found USR %u (%04X) on line %u\n", addr, addr, line);
-
-                        mark = 2; // red
-                        trace_safe(addr, reg_sp);
-                    }
-                }
-            }
-
-            // Mark the BASIC line, including 4-byte header
-            mark = 7; // white
-            for (i = 0 ; i < 4+len ; i++)
-                seen[prog-4+i] |= mark;
-
-            basiclen += 4+len;
+            // Advance to next line
             prog += len;
         }
     }
 }
+
+void trace_eline ()
+{
+    // Look up edit line and spare space addresses
+    WORD e_line = (mem[E_LINE+1] << 8) | mem[E_LINE];
+    WORD stkend = (mem[STKEND+1] << 8) | mem[STKEND];
+
+    // Check the values are sensible before we use them (terminators before each)
+    if (e_line && stkend && (stkend > e_line) && mem[e_line-1] == 0x80 && mem[stkend-1] == 0x80)
+        trace_line(e_line, stkend-e_line, -1);
+}
+
 
 void trace_im2 (BYTE i)
 {
@@ -519,8 +571,8 @@ int main (int argc, char *argv[])
             verbose++;
         else if (!strcmp(argv[i], "-vv")) // more verbose
             verbose += 2;
-        else if (!strcmp(argv[i], "-u")) // force USR trace
-            usrtrace = true;
+        else if (!strcmp(argv[i], "-u")) // skip USR trace
+            usrtrace = false;
         else if (!strcmp(argv[i], "-2")) // skip IM 2 trace
             im2trace = false;
         else if (!strcmp(argv[i], "-r")) // include ROM in output image
@@ -546,9 +598,12 @@ int main (int argc, char *argv[])
     // Trace from PC in snapshot
     trace_addr(reg_pc, reg_sp, reg_sp, true);
 
-    // Trace using USR statements in BASIC (forced if PC trace came up empty)
-    if (usrtrace || !memcmp(seen+0x4000, seen+0x4001, 0xbfff))
-        trace_usr();
+    // Trace using USR statements in BASIC and the current editing line
+    if (usrtrace)
+    {
+        trace_prog();
+        trace_eline();
+    }
 
     // Trace IM 2 handler if active, or setup detected in code
     if (im2trace && reg_im == 2)
@@ -564,6 +619,5 @@ int main (int argc, char *argv[])
         n += seen[i] != 0;
 
     printf("Traced %d Z80 bytes, BASIC length %d.\n", n-basiclen, basiclen);
-
     return 0;
 }

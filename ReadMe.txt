@@ -54,6 +54,7 @@ indicating how code was reached:
   green = code found from snapshot Program Counter
   red = code found from USR statement in BASIC listing
   blue = code found from IM 2 handler
+  white = BASIC program
 
 If the same location was visited from different starting points, the colours
 are combined using additive mixing (i.e. green+red=yellow).
