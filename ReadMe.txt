@@ -14,7 +14,10 @@ Required libraries:
   libspectrum: http://fuse-emulator.sf.net/libspectrum.php
   libpng: http://www.libpng.org/pub/png/libpng.html
 
-If your headers and libraries are in standard locations, simply use:
+If you're using Ubuntu that may be as simple as:
+  sudo apt-get install libspectrum-dev libpng12-dev
+
+If your headers and libraries are in standard locations, use:
   g++ -o snaptrace snaptrace.cpp -lspectrum -lpng
 
 Or if you have the CMake build system installed, use:
@@ -22,6 +25,7 @@ Or if you have the CMake build system installed, use:
   cd build
   cmake ..
   make
+  sudo make install
 
 
 Running

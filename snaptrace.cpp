@@ -7,6 +7,12 @@
 #include <png.h>
 #include "libspectrum.h"
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#else
+#define ROM_DIR
+#endif
+
 #define MAX_NOP_RUN 10  // Allow up to 10 NOPs before we suspect we're in free memory
 
 #define PROG   0x5c53   // contains address of BASIC program
@@ -448,15 +454,15 @@ void trace_im2 (BYTE i)
 bool read_rom (const char *romfile)
 {
     FILE *f = fopen(romfile, "rb");
-    if (!f)
-        perror(romfile);
-    else
+    size_t datalen = 0;
+
+    if (f)
     {
-        fread(mem, 0x4000, 1, f);
+        datalen = fread(mem, 1, 0x4000, f);
         fclose(f);
     }
 
-    return f != NULL;
+    return f != NULL && datalen == 0x4000;
 }
 
 int read_snapshot (const char *filename)
@@ -592,7 +598,12 @@ int main (int argc, char *argv[])
         fprintf(stderr, "Usage: %s [-v] [-u] [-2] [-r] [-s] <snapshot>\n", argv[0]);
         return 1;
     }
-    else if (!read_rom("48.rom") || !read_snapshot(file))
+    else if (!read_rom("48.rom") && !read_rom(ROM_DIR "48.rom"))
+    {
+        perror(ROM_DIR "48.rom");
+        return 1;
+    }
+    else if (!read_snapshot(file))
         return 1;
 
     // Trace from PC in snapshot
