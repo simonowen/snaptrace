@@ -39,6 +39,8 @@ int verbose = 0;        // 0-2 for tracing detail levels
 bool basictrace = true; // trace USR statements found in BASIC (enabled, -b to disable)
 bool im2trace = true;   // trace interrupt handler if IM 2 active (enabled, -i to disable)
 bool pngsave = true;    // save output as PNG image (enabled, -s to disable)
+bool mapsave = false;   // save code bitmap (disabled, -m to enable)
+bool z80only = false;   // include only z80 code in output (disabled, -z to enable)
 
 
 bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
@@ -394,9 +396,13 @@ void trace_line (WORD addr, int len, int line)
     if (line >= 0) addr -= 4;
     basiclen += i-addr+1;
 
-    mark = 7; // white
-    while (addr <= i)
-        seen[addr++] |= mark;
+    // Unless it's disabled, mark the BASIC program as code
+    if (!z80only)
+    {
+        mark = 7; // white
+        while (addr <= i)
+            seen[addr++] |= mark;
+    }
 }
 
 void trace_prog ()
@@ -566,6 +572,36 @@ void write_png (const char *filename)
         perror("fopen");
 }
 
+void write_map (const char *filename)
+{
+    char buf[256];
+    strncpy(buf, filename, sizeof(buf)-4);
+
+    // Change any file extension for .map
+    char *p = strrchr(buf, '.');
+    if (p) *p = '\0';
+    strcat(buf, ".map");
+
+    FILE *f = fopen(buf, "wb");
+    if (f)
+    {
+        BYTE map[0x10000/8] = {};
+        int mapstart = 256*savemsb/8;
+
+        // Save the visited state of each location to the compact map
+        // Note: bits are filled from left (bit 7) to right (bit 0)
+        for (int i = 0 ; i < sizeof(seen) ; i++)
+            map[i/8] |= (seen[i] != 0) << (7-(i&7));
+
+        if (!fwrite(map+mapstart, sizeof(map)-mapstart, 1, f))
+            perror("fwrite");
+
+        fclose(f);
+    }
+    else
+        perror("fopen");
+}
+
 
 int main (int argc, char *argv[])
 {
@@ -585,6 +621,10 @@ int main (int argc, char *argv[])
             savemsb = 0x00;
         else if (!strcmp(argv[i], "-s")) // skip saving PNG image
             pngsave = false;
+        else if (!strcmp(argv[i], "-m")) // save code bitmap
+            mapsave = true;
+        else if (!strcmp(argv[i], "-z")) // include only Z80 code in output
+            z80only = true;
         else if (argv[i][0] == '-')
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
         else if (!file)
@@ -624,6 +664,9 @@ int main (int argc, char *argv[])
 
     if (pngsave)
         write_png(file);
+
+    if (mapsave)
+        write_map(file);
 
     int n = 0;
     for (size_t i = 0x4000 ; i < sizeof(seen) ; i++)
