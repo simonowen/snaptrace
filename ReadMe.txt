@@ -83,26 +83,34 @@ Information:
    This may simply be to discard one or more calls, preventing a return,
    or could require additional handling to be recognised.
 
- "data following call to XXXX"
-   The call to XXXX is followed by data, and further calls to it blacklisted.
-
  "ret to stacked data"
    Data was on the stack when a RET was encountered.
    This may simply be to insert a new exit point before the original return.
 
- "ex (sp) on return address"
+ "stopping at ex (sp) on return address"
    Program is accessing the return address on the stack using EX (SP),HL/IX/IY
    This is only a notification of likely mixed code/data use.
 
+ "stopping at ROM loader"
+   Calls following calls to the Spectrum tape loading code rely on loaded
+   data, so tracing cannot safely continue beyond it.
+
+ "blacklisted call to XXXX"
+   Code at the indicated address is accessing data at the return address
+   location.  Tracing is prevented from returning to the calling location.
+
+ "skipped due to suspicious code start"
+   The start of an entry point doesn't look like code and will not be traced.
+
 Warnings:
 
- "*** suspicious block of 4+ NOPs ***"
-   A block of 4 or more NOPs have been encountered during the trace process.
-   Tracing has likely escaped into unused memory!
+ "*** suspicious block of 10+ NOPs ***"
+   A block of 10 or more NOPs have been encountered during the trace process.
+   Tracing has likely escaped into open/unused memory!
 
  "*** suspicious ld r,r ***"
    An inert assignment with the same source and target register was found.
-   Tracing has likely escaped and executing data!
+   Tracing has likely escaped and is executing data!
 
 The last 2 messages may indicate a problem in snaptrace that needs fixing.
 If you encounter either of them, please send me the snapshot(s) for analysis.
