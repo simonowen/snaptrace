@@ -2,7 +2,8 @@ ZX Spectrum snapshot tracer
 ===========================
 
 This utility attempts to locate code regions in 48K Spectrum snapshots.
-It uses static tracing to follow all possible code paths.
+It uses static tracing to follow all possible code paths, without executing
+any code or modifying the snapshot memory.
 
 
 Compiling
@@ -35,10 +36,12 @@ Running
 
     -v   Verbose output with more detail about tracing
     -vv  Extra verbose output for every location visited
-    -u   Force scanning for USR statements to trace
-    -2   Skip IM2 handler tracing, even if in IM2
-    -r   Include ROM area in output image (256x256)
-    -s   Don't save results to PNG image
+    -b   Skip scanning BASIC for USR code entry points
+    -i   Skip tracing IM 2 handler, even if in IM 2 mode
+    -r   Include ROM area in trace output files
+    -s   Don't save results to .png image
+    -m   Save code bitmap to .map file
+    -z   Include only Z80 code in .png and .map files
 
     <snapshot> should be a 48K snapshot in SZX/Z80/SNA/SNP format.
 
@@ -62,6 +65,9 @@ indicating how code was reached:
 
 If the same location was visited from different starting points, the colours
 are combined using additive mixing (i.e. green+red=yellow).
+
+For the best results use a snapshot saved at the main game menu.  Some games
+perform runtime code manipulation during startup, which can't be traced.
 
 
 Output
