@@ -319,11 +319,19 @@ void trace_line (WORD addr, int len, int line)
     int i;
     bool inquotes = false;
 
-    if (verbose)
+    if (verbose && line >= 0)
         printf("%04X: BASIC line %u len %u\n", addr, line, len);
 
     for (i = addr ; i < addr+len ; i++)
     {
+        // REMs can contain almost anything, including code, so just skip them
+        if (mem[i] == 0xea)
+        {
+            if (verbose) printf(" skipping REM (%u bytes)\n", len-(i-addr)-1);
+            i = addr+len-1;
+            break;
+        }
+
         // Track strings, so UDGs can be ignored
         if (mem[i] == '"')
         {
@@ -424,6 +432,10 @@ void trace_prog ()
             WORD line = (mem[prog] << 8) | mem[prog+1];
             WORD len = (mem[prog+3] << 8) | mem[prog+2];
             prog += 4;
+
+            // Stop if the line length exceeds the program area
+            if (prog+len > vars)
+                break;
 
             // Trace USRs on the line
             trace_line(prog, len, line);
