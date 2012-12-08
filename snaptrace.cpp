@@ -371,8 +371,11 @@ void trace_line (WORD addr, int len, int line)
         }
         else if (isdigit(mem[i+1]))
         {
-            // Skip the string of digits, which can't be trusted
-            for (i++ ; isdigit(mem[i]) ; i++);
+            WORD addrtext = 0;
+
+            // Convert string digits to number, to check against encoded number
+            for (i++ ; isdigit(mem[i]) ; i++)
+                addrtext = addrtext*10 + mem[i]-'0';
 
             // 5-byte number format with an integer?
             if (mem[i] == 0x0e && mem[i+1] == 0 && mem[i+2] == 0 && mem[i+5] == 0)
@@ -380,6 +383,8 @@ void trace_line (WORD addr, int len, int line)
                 WORD addr = (mem[i+4] << 8) | mem[i+3];
                 if (line < 0)
                     printf("Found USR %u (%04X) on edit line\n", addr, addr);
+                else if (addrtext != addr)
+                    printf("Found USR %u (%04X) [\"%u\"] on line %u\n", addr, addr, addrtext, line);
                 else
                     printf("Found USR %u (%04X) on line %u\n", addr, addr, line);
 
