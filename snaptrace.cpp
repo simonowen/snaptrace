@@ -606,9 +606,9 @@ void write_map (const char *filename)
         int mapstart = 256*savemsb/8;
 
         // Save the visited state of each location to the compact map
-        // Note: bits are filled from left (bit 7) to right (bit 0)
+        // Note: bits are filled from right (bit 0) to left (bit 7)
         for (int i = 0 ; i < sizeof(seen) ; i++)
-            map[i/8] |= (seen[i] != 0) << (7-(i&7));
+            map[i/8] |= (seen[i] != 0) << (i&7);
 
         if (!fwrite(map+mapstart, sizeof(map)-mapstart, 1, f))
             perror("fwrite");
