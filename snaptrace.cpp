@@ -15,6 +15,8 @@
 
 #define MAX_NOP_RUN 10  // Allow up to 10 NOPs before we suspect we're in free memory
 
+#define MARK_INSTR 0x08 // seen[] bit indicating start of z80 instruction
+
 #define PROG   0x5c53   // contains address of BASIC program
 #define VARS   0x5c4b   // contains address of BASIC variables
 #define E_LINE 0x5c59   // contains address being typed in
@@ -40,7 +42,7 @@ bool basictrace = true; // trace USR statements found in BASIC (enabled, -b to d
 bool im2trace = true;   // trace interrupt handler if IM 2 active (enabled, -i to disable)
 bool pngsave = true;    // save output as PNG image (enabled, -s to disable)
 bool mapsave = false;   // save code bitmap (disabled, -m to enable)
-bool z80only = false;   // include only z80 code in output (disabled, -z to enable)
+bool instrmap = false;  // only include z80 instruction start in map (disabled, -z to enable)
 
 
 bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
@@ -56,14 +58,14 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
         return false;
     }
 
-    // Loop until we reach a previously visited location
-    while (!(seen[pc] & mark))
+    // Loop until we reach an instruction location using the current mark
+    while ((seen[pc] & (MARK_INSTR|mark)) != (MARK_INSTR|mark))
     {
         if (verbose > 1 && !ddfd) printf("PC=%04X SP=%04X %s\n", pc, sp, toplevel?"top-level":"");
 
-        // Next opcode, mark as visited
+        // Next instruction (or prefix), mark as visited
         op = mem[pc];
-        seen[pc++] |= mark;
+        seen[pc++] |= (MARK_INSTR|mark);
 
         switch (op)
         {
@@ -409,13 +411,10 @@ void trace_line (WORD addr, int len, int line)
     if (line >= 0) addr -= 4;
     basiclen += i-addr+1;
 
-    // Unless it's disabled, mark the BASIC program as code
-    if (!z80only)
-    {
-        mark = 7; // white
-        while (addr <= i)
-            seen[addr++] |= mark;
-    }
+    // Mark the BASIC program in whitee
+    mark = 7; // white
+    while (addr <= i)
+        seen[addr++] |= mark;
 }
 
 void trace_prog ()
@@ -571,8 +570,11 @@ void write_png (const char *filename)
 
         png_set_IHDR(png, info, 256, 256-savemsb, 8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
 
-        png_color palette[256] = { {0,0,0}, {64,64,255}, {255,64,64}, {255,64,255}, {64,255,64}, {64,255,255}, {255,255,64}, {255,255,255} };
-        png_set_PLTE(png, info, palette, 8);
+        png_color palette[256] = {
+            {0,0,0}, {0,0,224}, {224,0,0}, {224,0,224}, {0,224,0}, {0,224,224}, {224,224,0}, {224,224,224},
+            {0,0,0}, {64,64,255}, {255,64,64}, {255,64,255}, {64,255,64}, {64,255,255}, {255,255,64}, {255,255,255}
+        };
+        png_set_PLTE(png, info, palette, 16);
 
         png_write_info(png, info);
 
@@ -605,10 +607,12 @@ void write_map (const char *filename)
         BYTE map[0x10000/8] = {};
         int mapstart = 256*savemsb/8;
 
-        // Save the visited state of each location to the compact map
-        // Note: bits are filled from right (bit 0) to left (bit 7)
+        // Mask to determine which entries to include in the map
+        BYTE map_mask = instrmap ? MARK_INSTR : 0xff;
+
+        // Build the compact map (bits filled in the order 0 to 7)
         for (int i = 0 ; i < sizeof(seen) ; i++)
-            map[i/8] |= (seen[i] != 0) << (i&7);
+            map[i/8] |= ((seen[i] & map_mask) != 0) << (i&7);
 
         if (!fwrite(map+mapstart, sizeof(map)-mapstart, 1, f))
             perror("fwrite");
@@ -640,8 +644,8 @@ int main (int argc, char *argv[])
             pngsave = false;
         else if (!strcmp(argv[i], "-m")) // save code bitmap
             mapsave = true;
-        else if (!strcmp(argv[i], "-z")) // include only Z80 code in output
-            z80only = true;
+        else if (!strcmp(argv[i], "-z")) // only Z80 instruction start in map
+            instrmap = true;
         else if (argv[i][0] == '-')
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
         else if (!file)
@@ -652,7 +656,7 @@ int main (int argc, char *argv[])
 
     if (!file)
     {
-        fprintf(stderr, "Usage: %s [-v] [-b] [-i] [-r] [-s] <snapshot>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-bimrsvz] <snapshot>\n", argv[0]);
         return 1;
     }
     else if (!read_rom("48.rom") && !read_rom(ROM_DIR "48.rom"))

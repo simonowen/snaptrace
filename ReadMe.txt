@@ -32,7 +32,7 @@ Or if you have the CMake build system installed, use:
 Running
 -------
 
-  Usage: snaptrace [-v] [-u] [-2] [-r] [-s] <snapshot>
+  Usage: snaptrace [-bimrsvz] <snapshot>
 
     -v   Verbose output with more detail about tracing
     -vv  Extra verbose output for every location visited
@@ -41,7 +41,7 @@ Running
     -r   Include ROM area in trace output files
     -s   Don't save results to .png image
     -m   Save code bitmap to .map file
-    -z   Include only Z80 code in .png and .map files
+    -z   Include only Z80 instruction start in .map file
 
     <snapshot> should be a 48K snapshot in SZX/Z80/SNA/SNP format.
 
