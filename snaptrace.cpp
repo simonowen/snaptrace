@@ -630,28 +630,35 @@ int main (int argc, char *argv[])
 
     for (int i = 1 ; i < argc ; i++)
     {
-        if (!strcmp(argv[i], "-v")) // verbose
-            verbose++;
-        else if (!strcmp(argv[i], "-vv")) // more verbose
-            verbose += 2;
-        else if (!strcmp(argv[i], "-b")) // skip BASIC scan for USRs
-            basictrace = false;
-        else if (!strcmp(argv[i], "-i")) // skip IM 2 trace
-            im2trace = false;
-        else if (!strcmp(argv[i], "-r")) // include ROM in output image
-            savemsb = 0x00;
-        else if (!strcmp(argv[i], "-s")) // skip saving PNG image
-            pngsave = false;
-        else if (!strcmp(argv[i], "-m")) // save code bitmap
-            mapsave = true;
-        else if (!strcmp(argv[i], "-z")) // only Z80 instruction start in map
-            instrmap = true;
-        else if (argv[i][0] == '-')
-            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+        // Option?
+        if (argv[i][0] == '-')
+        {
+            for (char *p = argv[i]+1 ; *p ; p++)
+            {
+                switch (*p)
+                {
+                    case 'v': verbose++; break;          // verbose
+                    case 'b': basictrace = false; break; // skip BASIC scan for USRs
+                    case 'i': im2trace = false; break;   // skip IM 2 trace
+                    case 'r': savemsb = 0x00; break;     // include ROM in output image
+                    case 's': pngsave = false; break;    // skip saving PNG image
+                    case 'm': mapsave = true; break;     // save code bitmap
+                    case 'z': instrmap = true; break;    // only Z80 instruction start in map
+
+                    default:
+                        fprintf(stderr, "Unknown option: -%c\n", *p);
+                        exit(1);
+                        break;
+                }
+            }
+        }
         else if (!file)
             file = argv[i];
         else
+        {
             fprintf(stderr, "Unexpected argument: %s\n", argv[i]);
+            exit(1);
+        }
     }
 
     if (!file)
