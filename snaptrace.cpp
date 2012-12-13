@@ -314,7 +314,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                          (op == 0xc1 &&  mem[pc]         == 0x0a)))  // pop bc ; ld a,(bc)
                     {
                         if (pc >= 0x4000) Log(level, pc, "stopping at return address data access\n");
-                        ret |= retStop;
+                        ret |= retBlacklist;
                     }
                     else if (ddfd && op == 0xe1) // pop ix/iy
                     {
@@ -323,7 +323,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                             if (mem[pc+w] == mem[pc-2] && (mem[pc+w+1] & 0xc7) == 0x46 && mem[pc+w+2] <= 0x01) // ld r,(ix/iy+0/1)
                             {
                                 if (pc >= 0x4000) Log(level, pc+w, "stopping at return address data access\n");
-                                ret |= retStop;
+                                ret |= retBlacklist;
                             }
                         }
                     }
