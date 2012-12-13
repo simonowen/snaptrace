@@ -25,6 +25,9 @@
 typedef unsigned char BYTE;
 typedef unsigned short WORD;
 
+// trace_addr return conditions
+enum { retOK=0x00, retStop=0x01, retBlacklist=0x02 };
+
 WORD reg_pc, reg_sp;    // PC and SP from snapshot
 BYTE reg_i, reg_im;     // I and interrupt mode from snapshot
 
@@ -32,7 +35,7 @@ BYTE poss_i, poss_im;   // possible I and IM values in the code
 
 BYTE mem[0x10000];      // 64K address space, first 16K ROM
 BYTE seen[0x10000];     // code locations visited
-BYTE nocall[0x10000];   // blacklisted calls due to stack manipulation
+BYTE blacklist[0x10000];// blacklisted calls due to stack manipulation
 BYTE mark;              // current marker colour bit to combine into seen[pc]
 int basiclen;           // count of bytes in BASIC listing
 
@@ -43,25 +46,55 @@ bool im2trace = true;   // trace interrupt handler if IM 2 active (enabled, -i t
 bool pngsave = true;    // save output as PNG image (enabled, -s to disable)
 bool mapsave = false;   // save code bitmap (disabled, -m to enable)
 bool instrmap = false;  // only include z80 instruction start in map (disabled, -z to enable)
+bool decaddr = false;   // output addresses in decimal (disabled, -d to enable)
 
 
-bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
+const char *AddrStr (WORD addr)
+{
+    static char strs[4][16];
+    static int cur;
+
+    // Write address string to next buffer in current base
+    cur = (cur+1) & 3;
+    snprintf(strs[cur], sizeof(strs[cur]), decaddr ? "%05u" : "%04X", addr);
+
+    return strs[cur];
+}
+
+void Log (int level, int pc, const char *fmt, ...)
+{
+    // Optionally output PC
+    if (pc >= 0) printf("%s: ", AddrStr(pc));
+
+    // Output indent
+    printf("%*s", (verbose > 0) ? (3*level) : 0, "");
+
+    // Output rest of message
+    va_list args;
+    va_start (args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
+
+
+int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
 {
     WORD addr;
     BYTE op;
     bool ddfd = false;
+    int ret = retOK;
 
     // Continuing beyond ROM loader is unsafe as it may rely on loaded code
     if (pc == 0x0556)
     {
-        printf("%04X: stopping at ROM loader\n", pc);
-        return false;
+        Log(level, pc, "stopping at ROM loader\n");
+        return retBlacklist;
     }
 
     // Loop until we reach an instruction location using the current mark
     while ((seen[pc] & (MARK_INSTR|mark)) != (MARK_INSTR|mark))
     {
-        if (verbose > 1 && !ddfd) printf("PC=%04X SP=%04X %s\n", pc, sp, toplevel?"top-level":"");
+        if (verbose > 2 && !ddfd) Log(0, -1, "PC=%s SP=%s stacked=%d %s\n", AddrStr(pc), AddrStr(sp), int(basesp)-sp, (level==0)?"top-level":"");
 
         // Next instruction (or prefix), mark as visited
         op = mem[pc];
@@ -86,15 +119,21 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                 {
                     case 0x45: case 0x55: case 0x65: case 0x75: // retn
                     case 0x4d: case 0x5d: case 0x6d: case 0x7d: // reti
-                        if (toplevel)
-                        {
-                            addr = (mem[sp+1] << 8) | mem[sp];
-                            if (verbose) printf("%04X: reti/retn (top-level)\n", pc-2);
-                            trace_addr(addr, sp+2, sp+2, toplevel);
-                        }
-                        return true;
+
+                        // Fetch return address from top of stack
+                        addr = (mem[sp+1] << 8) | mem[sp];
+                        if (verbose) Log(level, pc-2, "RETI/RETN to %s %s\n", AddrStr(addr), (level==0)?"(top-level)":"");
+
+                        // Top-level is a special case and treated as a new entry point
+                        if (level == 0)
+                            return trace_addr(addr, sp+2, sp+2, 0);
+
+                        // Stopping at RETN/RETI
+                        return ret;
 
                     case 0x7b: // ld sp,(nn)
+                        addr = (mem[pc+1] << 8) | mem[pc];
+                        if (verbose > 1) Log(level, pc-1, "LD SP,(%s)\n", AddrStr(addr));
                         basesp = sp;
                     case 0x43: case 0x53: case 0x63: case 0x73: // ld (nn),rr
                     case 0x4b: case 0x5b: case 0x6b: // ld rr,(nn)
@@ -106,12 +145,12 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                         if (poss_i < 0x40 && mem[pc-4] == 0x3e/*ld a,n*/)
                         {
                             poss_i = mem[pc-3];
-                            if (verbose > 1) printf(" LD A,%02X ; LD I,A\n", pc-4, poss_i);
+                            if (verbose > 1) Log(level, pc-4, "LD A,%02X ; LD I,A\n", pc-4, poss_i);
                         }
                         break;
 
                     case 0x5e: // im 2
-                        if (verbose > 1) printf(" IM 2\n");
+                        if (verbose > 1) Log(level, pc-2, "IM 2\n");
                         poss_im = 2;
                         break;
                 }
@@ -121,18 +160,18 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
             case 0x00: // nop
                 if (pc-1 >= 0x4000 && pc < (0xffff-MAX_NOP_RUN) && !memcmp(mem+pc, mem+pc+1, MAX_NOP_RUN-1))
                 {
-                    printf("%04X: *** suspicious block of %d+ NOPs ***\n", pc-1, MAX_NOP_RUN);
-                    return true;
+                    Log(level, pc-1, "*** suspicious block of %d+ NOPs ***\n", MAX_NOP_RUN);
+                    return ret;
                 }
                 break;
 
-            case 0xe3: // ex (sp),hl
-                if (verbose > 1) printf(" ex (sp),hl\n");
+            case 0xe3: // ex (sp),hl/ix/iy
+                if (verbose > 1) Log(level, pc-1-ddfd, "EX (SP),%s\n", ddfd?"IX/IY":"HL");
 
                 if (sp == basesp) // pointing to return adddress?
                 {
-                    if (pc >= 0x4000) printf("%04X: stopping at ex (sp) on return address\n", pc-1);
-                    return false;
+                    if (pc >= 0x4000) Log(level, pc-1, "stopping at EX (SP) on return address\n");
+                    return retBlacklist;
                 }
                 break;
 
@@ -155,11 +194,17 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                 seen[pc++] |= mark;
 
                 addr = pc+static_cast<signed char>(mem[pc-1]);
-                if (verbose) printf("%04X: %s %04X\n", pc-2, (op==0x10)?"djnz":"jr", addr);
+                if (verbose) Log(level, pc-2, "%s %s\n", (op==0x10)?"DJNZ":"JR", AddrStr(addr));
 
-                bool ret1 = trace_addr(addr, sp, basesp, toplevel);
-                bool ret2 = (op == 0x18/*jr*/) || trace_addr(pc, sp, basesp, toplevel);
-                return ret1 && ret2;
+                // Trace the jump target
+                ret |= trace_addr(addr, sp, basesp, level);
+
+                // Unconditional JR stops here
+                if (op == 0x18)
+                    return ret;
+
+                // Continue processing after JR cc or DJNZ
+                break;
             }
 
             case 0xc3: // jp
@@ -169,11 +214,17 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                 seen[pc++] |= mark;
 
                 addr = (mem[pc-1] << 8) | mem[pc-2];
-                if (verbose) printf("%04X: jp %04X\n", pc-3, addr);
+                if (verbose) Log(level, pc-3, "JP %s\n", AddrStr(addr));
 
-                bool ret1 = trace_addr(addr, sp, basesp, toplevel);
-                bool ret2 = (op == 0xc3/*jp*/) || trace_addr(pc, sp, basesp, toplevel);
-                return ret1 && ret2;
+                // Trace the jump target
+                ret |= trace_addr(addr, sp, basesp, level);
+
+                // Unconditional JP stops here
+                if (op == 0xc3)
+                    return ret;
+
+                // Continue processing after JP cc
+                break;
             }
 
             case 0xcd: // call
@@ -183,7 +234,7 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                 if ((op & 0xc7) == 0xc7) // rst?
                 {
                     addr = op & 0x38;
-                    if (verbose) printf("%04X: rst %02X %s\n", pc-1, addr, nocall[addr]?"(blacklisted)":"");
+                    if (verbose) Log(level, pc-1, "RST %02X\n", addr);
                 }
                 else // call
                 {
@@ -191,56 +242,70 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                     seen[pc++] |= mark;
 
                     addr = (mem[pc-1] << 8) | mem[pc-2];
-                    if (verbose) printf("%04X: call %04X %s\n", pc-3, addr, nocall[addr]?"(blacklisted)":"");
+                    if (verbose) Log(level, pc-3, "CALL %s\n", AddrStr(addr));
                 }
 
-                if (nocall[addr])
-                    return true;
+                // If the call address is blacklisted, stop here
+                if (blacklist[addr])
+                    return ret;
 
-                // Recursive call to trace CALL
-                if (!trace_addr(addr, sp-2, sp-2, false))
+                // Trace the call target
+                ret |= trace_addr(addr, sp-2, sp-2, level+1);
+
+                // Should the call we just made be blacklisted?
+                if (ret & retBlacklist)
                 {
-                    if (pc >= 0x4000) printf("%04X: blacklisted call to %04X\n", pc, addr);
-                    nocall[addr] = 1;
-                    return true;
+                    if (pc >= 0x4000) Log(level, pc, "blacklisting calls to %s\n", AddrStr(addr));
+                    blacklist[addr] = 1;
+                    ret = (ret & ~retBlacklist) | retStop;
                 }
+
+                // Should we stop at the call?
+                if (ret & retStop)
+                {
+                    ret &= ~retStop;
+                    return ret;
+                }
+
+                // Continue processing after CALL
                 break;
 
             case 0xc9: // ret
             case 0xc0: case 0xc8: case 0xd0: case 0xd8: case 0xe0: case 0xe8: case 0xf0: case 0xf8: // ret cc
-                if (sp < basesp)
+
+                // Fetch return address from top of stack
+                addr = (mem[sp+1] << 8) | mem[sp];
+
+                if (pc >= 0x4000 && sp < basesp)
+                    Log(level, pc-1, "RET to stacked data\n");
+                else if (level == 0)
                 {
-                    if (pc >= 0x4000) printf("%04X: ret to stacked data\n", pc-1);
-                    return true;
+                    // Top-level is a special case and treated as a new entry point
+                    if (verbose) Log(level, pc-1, "RET to %s %s\n", AddrStr(addr), (level==0)?"(top-level)":"");
+                    return trace_addr(addr, sp+2, sp+2, 0);
                 }
 
-                if (toplevel)
-                {
-                    addr = (mem[sp+1] << 8) | mem[sp];
-                    if (verbose) printf("%04X: ret (top-level)\n", pc-1);
-                    trace_addr(addr, sp+2, sp+2, toplevel);
-                }
+                // Unconditional RET stops here
+                if (op == 0xc9)
+                    return ret;
 
-                if (op == 0xc9) // ret
-                {
-                    if (verbose) printf("%04X: ret\n", pc-1);
-                    return true;
-                }
+                // Continue processing after RET cc
                 break;
 
             case 0xe9: // jp (hl)
-                return true;
+                return ret;
 
 
             case 0xc5: case 0xd5: case 0xe5: case 0xf5: // push rr
-                if (verbose > 1) printf(" push\n");
+                if (verbose > 1) Log(level, pc-1-ddfd, "PUSH\n");
                 sp -= 2;
                 break;
 
             case 0xc1: case 0xd1: case 0xe1: case 0xf1: // pop rr
-                if (verbose > 1) printf(" pop\n");
+                if (verbose > 1) Log(level, pc-1-ddfd, "POP\n");
 
-                if (!toplevel && sp == basesp)
+                // Pop with no data on the stack? (not top-level as stack state is unknown)
+                if (sp == basesp && level > 0)
                 {
                     // Return pop followed by data access?
                     if (!ddfd &&
@@ -248,8 +313,8 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                          (op == 0xd1 &&  mem[pc]         == 0x1a) || // pop de ; ld a,(de)
                          (op == 0xc1 &&  mem[pc]         == 0x0a)))  // pop bc ; ld a,(bc)
                     {
-                        if (pc >= 0x4000) printf("%04X: stopping at return address data access\n", pc);
-                        return false;
+                        if (pc >= 0x4000) Log(level, pc, "stopping at return address data access\n");
+                        ret |= retStop;
                     }
                     else if (ddfd && op == 0xe1) // pop ix/iy
                     {
@@ -257,26 +322,27 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                         {
                             if (mem[pc+w] == mem[pc-2] && (mem[pc+w+1] & 0xc7) == 0x46 && mem[pc+w+2] <= 0x01) // ld r,(ix/iy+0/1)
                             {
-                                if (pc >= 0x4000) printf("%04X: stopping at return address data access\n", pc+w);
-                                return false;
+                                if (pc >= 0x4000) Log(level, pc+w, "stopping at return address data access\n");
+                                ret |= retStop;
                             }
                         }
                     }
 
-                    if (pc >= 0x4000) printf("%04X: return address popped\n", pc-1-ddfd);
-                    return true;
+                    // Report the return address pop unless we've detected a data access
+                    if (!(ret & retStop) && pc >= 0x4000) Log(level, pc-1-ddfd, "return address popped\n");
                 }
 
                 sp += 2;
+                if (level == 0) basesp = sp;
                 break;
 
             case 0x33:  // inc sp
-                if (verbose > 1) printf(" inc sp\n");
+                if (verbose > 1) Log(level, pc-1, "INC SP\n");
                 sp++;
                 break;
 
             case 0x3b:  // dec sp
-                if (verbose > 1) printf(" dec sp\n");
+                if (verbose > 1) Log(level, pc-1, "DEC SP\n");
                 sp--;
                 break;
 
@@ -288,6 +354,8 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                 break;
 
             case 0x31:  // ld sp,nn
+                addr = (mem[pc+1] << 8) | mem[pc];
+                if (verbose > 1) Log(level, pc-1, "LD SP,%s\n", AddrStr(addr));
                 basesp = sp;
             case 0x01: case 0x11: case 0x21: // ld rr,nn
             case 0x22: case 0x2a: case 0x32: case 0x3a: // ld (nn),hl ; ld hl,(nn) ; ld (nn),a ; ld a,(nn)
@@ -296,23 +364,23 @@ bool trace_addr (WORD pc, WORD sp, WORD basesp, bool toplevel)
                 break;
 
             case 0x40: case 0x49: case 0x52: case 0x5b: case 0x64: case 0x6d: case 0x7f: // ld r,r
-                printf("%04X: *** suspicious ld r,r ***\n", pc-1);
-                return true;
+                Log(level, pc-1, "*** suspicious ld r,r ***\n");
+                return ret;
         }
 
         ddfd = false;
     }
 
-    return true;
+    return ret;
 }
 
 // Trace a given address, if it looks safe to do
 void trace_safe (WORD pc, WORD sp)
 {
     if (mem[pc] == 0x00 || mem[pc] == 0xff)
-        printf(" skipped due to suspicious code start (%02X)\n", mem[pc]);
+        printf("skipped due to suspicious code start (%02X)\n", mem[pc]);
     else
-        trace_addr(pc, sp, sp, false);
+        trace_addr(pc, sp, sp, 1); // not top-level, no return allowed
 }
 
 
@@ -322,7 +390,7 @@ void trace_line (WORD addr, int len, int line)
     bool inquotes = false;
 
     if (verbose && line >= 0)
-        printf("%04X: BASIC line %u len %u\n", addr, line, len);
+        Log(0, addr, "BASIC line %u len %u\n", line, len);
 
     for (i = addr ; i < addr+len ; i++)
     {
@@ -371,9 +439,9 @@ void trace_line (WORD addr, int len, int line)
             if (mem[i] == '"')
             {
                 if (line < 0)
-                    printf("Found USR VAL$ %u (%04X) on edit line\n", addr, addr);
+                    printf("Found USR VAL$ %s on edit line\n", AddrStr(addr));
                 else
-                    printf("Found USR VAL$ %u (%04X) on line %u\n", addr, addr, line);
+                    printf("Found USR VAL$ %s on line %u\n", AddrStr(addr), line);
 
                 mark = 2; // red
                 trace_safe(addr, reg_sp);
@@ -381,22 +449,22 @@ void trace_line (WORD addr, int len, int line)
         }
         else if (isdigit(mem[i+1]))
         {
-            WORD addrtext = 0;
+            WORD textaddr = 0;
 
             // Convert string digits to number, to check against encoded number
             for (i++ ; isdigit(mem[i]) ; i++)
-                addrtext = addrtext*10 + mem[i]-'0';
+                textaddr = textaddr*10 + mem[i]-'0';
 
             // 5-byte number format with an integer?
             if (mem[i] == 0x0e && mem[i+1] == 0 && mem[i+2] == 0 && mem[i+5] == 0)
             {
                 WORD addr = (mem[i+4] << 8) | mem[i+3];
                 if (line < 0)
-                    printf("Found USR %u (%04X) on edit line\n", addr, addr);
-                else if (addrtext != addr)
-                    printf("Found USR %u (%04X) [\"%u\"] on line %u\n", addr, addr, addrtext, line);
+                    printf("Found USR %s on edit line\n", AddrStr(addr));
+                else if (textaddr != addr)
+                    printf("Found USR %s [\"%s\"] on line %u\n", AddrStr(addr), AddrStr(textaddr), line);
                 else
-                    printf("Found USR %u (%04X) on line %u\n", addr, addr, line);
+                    printf("Found USR %s on line %u\n", AddrStr(addr), line);
 
                 mark = 2; // red
                 trace_safe(addr, reg_sp);
@@ -465,7 +533,7 @@ void trace_im2 (BYTE i)
     // Sanity check to support runtime IM 2 detection
     if (i >= 0x40 && im_addr >= 0x4000 && (im_addr >> 8) == (im_addr & 0xff))
     {
-        printf("Tracing IM 2 from %04X\n", im_addr);
+        printf("Tracing IM 2 from %s\n", AddrStr(im_addr));
 
         mark = 1; // blue
         trace_safe(im_addr, reg_sp);
@@ -531,10 +599,7 @@ int read_snapshot (const char *filename)
                     reg_sp = libspectrum_snap_sp(snap);
                     reg_i = libspectrum_snap_i(snap);
                     reg_im = libspectrum_snap_im(snap);
-                    printf("%s: PC=%04X SP=%04X I=%02X IM=%u\n", filename, reg_pc, reg_sp, reg_i, reg_im);
-
-                    mark = 4; // green
-                    trace_addr(reg_pc, reg_sp, reg_sp, true);
+                    printf("%s: PC=%s SP=%s I=%02X IM=%u\n", filename, AddrStr(reg_pc), AddrStr(reg_sp), reg_i, reg_im);
 
                     ret = true;
                 }
@@ -637,12 +702,13 @@ int main (int argc, char *argv[])
             {
                 switch (*p)
                 {
-                    case 'v': verbose++; break;          // verbose
                     case 'b': basictrace = false; break; // skip BASIC scan for USRs
+                    case 'd': decaddr = true; break;     // output addresses in decimal
                     case 'i': im2trace = false; break;   // skip IM 2 trace
+                    case 'm': mapsave = true; break;     // save code bitmap
                     case 'r': savemsb = 0x00; break;     // include ROM in output image
                     case 's': pngsave = false; break;    // skip saving PNG image
-                    case 'm': mapsave = true; break;     // save code bitmap
+                    case 'v': verbose++; break;          // increase verbosity level
                     case 'z': instrmap = true; break;    // only Z80 instruction start in map
 
                     default:
@@ -663,7 +729,7 @@ int main (int argc, char *argv[])
 
     if (!file)
     {
-        fprintf(stderr, "Usage: %s [-bimrsvz] <snapshot>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-bdimrsvz] <snapshot>\n", argv[0]);
         return 1;
     }
     else if (!read_rom("48.rom") && !read_rom(ROM_DIR "48.rom"))
@@ -675,7 +741,8 @@ int main (int argc, char *argv[])
         return 1;
 
     // Trace from PC in snapshot
-    trace_addr(reg_pc, reg_sp, reg_sp, true);
+    mark = 4; // green
+    trace_addr(reg_pc, reg_sp, reg_sp, 0); // top-level, ret allowed
 
     // Trace using USR statements in BASIC and the current editing line
     if (basictrace)

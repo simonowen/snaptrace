@@ -32,15 +32,15 @@ Or if you have the CMake build system installed, use:
 Running
 -------
 
-  Usage: snaptrace [-bimrsvz] <snapshot>
+  Usage: snaptrace [-bdimrsvz] <snapshot>
 
-    -v   Verbose output with more detail about tracing
-    -vv  Extra verbose output for every location visited
     -b   Skip scanning BASIC for USR code entry points
+    -d   Show addresses in decimal rather than hex
     -i   Skip tracing IM 2 handler, even if in IM 2 mode
+    -m   Save code bitmap to .map file
     -r   Include ROM area in trace output files
     -s   Don't save results to .png image
-    -m   Save code bitmap to .map file
+    -v   Increase verbosity (0=basic, 1=control, 2=stack, 3=instructions)
     -z   Include only Z80 instruction start in .map file
 
     <snapshot> should be a 48K snapshot in SZX/Z80/SNA/SNP format.
@@ -83,11 +83,11 @@ Information:
    This may simply be to discard one or more calls, preventing a return,
    or could require additional handling to be recognised.
 
- "ret to stacked data"
+ "RET to stacked data"
    Data was on the stack when a RET was encountered.
    This may simply be to insert a new exit point before the original return.
 
- "stopping at ex (sp) on return address"
+ "stopping at EX (SP) on return address"
    Program is accessing the return address on the stack using EX (SP),HL/IX/IY
    This is only a notification of likely mixed code/data use.
 
@@ -118,6 +118,8 @@ If you encounter either of them, please send me the snapshot(s) for analysis.
 
 Credits
 -------
+
+Special thanks to Richard Dymond for helping with problem cases.
 
 Spectrum 48K ROM is copyright (c) Amstrad Consumer Electronics plc.
 Amstrad have kindly given their permission for the redistribution of their
