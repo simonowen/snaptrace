@@ -233,7 +233,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
             case 0xcd: // call
             case 0xc4: case 0xcc: case 0xd4: case 0xdc: case 0xe4: case 0xec: case 0xf4: case 0xfc: // call cc
             case 0xc7: case 0xcf: case 0xd7: case 0xdf: case 0xe7: case 0xef: case 0xf7: case 0xff: // rst
-
+            {
                 if ((op & 0xc7) == 0xc7) // rst?
                 {
                     addr = op & 0x38;
@@ -253,18 +253,19 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                     return ret;
 
                 // Trace the call target
-                ret |= trace_addr(addr, sp-2, sp-2, level+1);
+                int callret = trace_addr(addr, sp-2, sp-2, level+1);
 
                 // Should the call we just made be blacklisted?
-                if (ret & retBlacklist)
+                if (callret & retBlacklist)
                 {
                     if (pc >= 0x4000) Log(level, pc0, "blacklisted calls to %s\n", AddrStr(addr));
                     blacklist[addr] = 1;
-                    return ret & ~retBlacklist;
+                    return ret;
                 }
 
                 // Continue processing after CALL
                 break;
+            }
 
             case 0xc9: // ret
             case 0xc0: case 0xc8: case 0xd0: case 0xd8: case 0xe0: case 0xe8: case 0xf0: case 0xf8: // ret cc
