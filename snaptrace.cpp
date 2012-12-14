@@ -79,7 +79,7 @@ void Log (int level, int pc, const char *fmt, ...)
 
 int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
 {
-    WORD addr;
+    WORD pc0, addr;
     BYTE op;
     bool ddfd = false;
     int ret = retOK;
@@ -95,6 +95,9 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
     while ((seen[pc] & (MARK_INSTR|mark)) != (MARK_INSTR|mark))
     {
         if (verbose > 2 && !ddfd) Log(0, -1, "PC=%s SP=%s stacked=%d %s\n", AddrStr(pc), AddrStr(sp), int(basesp)-sp, (level==0)?"top-level":"");
+
+        // Start of instruction, 1 byte back if there's an index prefix
+        pc0 = pc - ddfd;
 
         // Next instruction (or prefix), mark as visited
         op = mem[pc];
@@ -122,7 +125,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
 
                         // Fetch return address from top of stack
                         addr = (mem[sp+1] << 8) | mem[sp];
-                        if (verbose) Log(level, pc-2, "RETI/RETN to %s %s\n", AddrStr(addr), (level==0)?"(top-level)":"");
+                        if (verbose) Log(level, pc0, "RETI/RETN to %s %s\n", AddrStr(addr), (level==0)?"(top-level)":"");
 
                         // Top-level is a special case and treated as a new entry point
                         if (level == 0)
@@ -132,8 +135,8 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                         return ret;
 
                     case 0x7b: // ld sp,(nn)
-                        addr = (mem[pc+1] << 8) | mem[pc];
-                        if (verbose > 1) Log(level, pc-1, "LD SP,(%s)\n", AddrStr(addr));
+                        addr = (mem[pc0+2] << 8) | mem[pc0+1];
+                        if (verbose > 1) Log(level, pc0, "LD SP,(%s)\n", AddrStr(addr));
                         basesp = sp;
                     case 0x43: case 0x53: case 0x63: case 0x73: // ld (nn),rr
                     case 0x4b: case 0x5b: case 0x6b: // ld rr,(nn)
@@ -142,15 +145,15 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                         break;
 
                     case 0x47: // ld i,a
-                        if (poss_i < 0x40 && mem[pc-4] == 0x3e/*ld a,n*/)
+                        if (mem[pc0-2] == 0x3e/*ld a,n*/ && mem[pc0-1] > 0x40)
                         {
-                            poss_i = mem[pc-3];
-                            if (verbose > 1) Log(level, pc-4, "LD A,%02X ; LD I,A\n", pc-4, poss_i);
+                            poss_i = mem[pc0-1];
+                            if (verbose > 1) Log(level, pc0-2, "LD A,%02X ; LD I,A\n", poss_i);
                         }
                         break;
 
                     case 0x5e: // im 2
-                        if (verbose > 1) Log(level, pc-2, "IM 2\n");
+                        if (verbose > 1) Log(level, pc0, "IM 2\n");
                         poss_im = 2;
                         break;
                 }
@@ -158,19 +161,19 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
 
 
             case 0x00: // nop
-                if (pc-1 >= 0x4000 && pc < (0xffff-MAX_NOP_RUN) && !memcmp(mem+pc, mem+pc+1, MAX_NOP_RUN-1))
+                if (pc0 >= 0x4000 && pc0 < (0xffff-MAX_NOP_RUN) && !memcmp(mem+pc0, mem+pc0+1, MAX_NOP_RUN-1))
                 {
-                    Log(level, pc-1, "*** suspicious block of %d+ NOPs ***\n", MAX_NOP_RUN);
+                    Log(level, pc0, "*** suspicious block of %d+ NOPs ***\n", MAX_NOP_RUN);
                     return ret;
                 }
                 break;
 
             case 0xe3: // ex (sp),hl/ix/iy
-                if (verbose > 1) Log(level, pc-1-ddfd, "EX (SP),%s\n", ddfd?"IX/IY":"HL");
+                if (verbose > 1) Log(level, pc0, "EX (SP),%s\n", ddfd?"IX/IY":"HL");
 
                 if (sp == basesp) // pointing to return adddress?
                 {
-                    if (pc >= 0x4000) Log(level, pc-1, "stopping at EX (SP) on return address\n");
+                    if (pc >= 0x4000) Log(level, pc0, "stopping at EX (SP) on return address\n");
                     return retBlacklist;
                 }
                 break;
@@ -193,8 +196,8 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
             {
                 seen[pc++] |= mark;
 
-                addr = pc+static_cast<signed char>(mem[pc-1]);
-                if (verbose) Log(level, pc-2, "%s %s\n", (op==0x10)?"DJNZ":"JR", AddrStr(addr));
+                addr = pc0+2+static_cast<signed char>(mem[pc0+1]);
+                if (verbose) Log(level, pc0, "%s %s\n", (op==0x10)?"DJNZ":"JR", AddrStr(addr));
 
                 // Trace the jump target
                 ret |= trace_addr(addr, sp, basesp, level);
@@ -213,8 +216,8 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 seen[pc++] |= mark;
                 seen[pc++] |= mark;
 
-                addr = (mem[pc-1] << 8) | mem[pc-2];
-                if (verbose) Log(level, pc-3, "JP %s\n", AddrStr(addr));
+                addr = (mem[pc0+2] << 8) | mem[pc0+1];
+                if (verbose) Log(level, pc0, "JP %s\n", AddrStr(addr));
 
                 // Trace the jump target
                 ret |= trace_addr(addr, sp, basesp, level);
@@ -234,15 +237,15 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 if ((op & 0xc7) == 0xc7) // rst?
                 {
                     addr = op & 0x38;
-                    if (verbose) Log(level, pc-1, "RST %02X\n", addr);
+                    if (verbose) Log(level, pc0, "RST %02X\n", addr);
                 }
                 else // call
                 {
                     seen[pc++] |= mark;
                     seen[pc++] |= mark;
 
-                    addr = (mem[pc-1] << 8) | mem[pc-2];
-                    if (verbose) Log(level, pc-3, "CALL %s\n", AddrStr(addr));
+                    addr = (mem[pc0+2] << 8) | mem[pc0+1];
+                    if (verbose) Log(level, pc0, "CALL %s\n", AddrStr(addr));
                 }
 
                 // If the call address is blacklisted, stop here
@@ -255,7 +258,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 // Should the call we just made be blacklisted?
                 if (ret & retBlacklist)
                 {
-                    if (pc >= 0x4000) Log(level, pc, "blacklisting calls to %s\n", AddrStr(addr));
+                    if (pc >= 0x4000) Log(level, pc0, "blacklisted calls to %s\n", AddrStr(addr));
                     blacklist[addr] = 1;
                     ret = (ret & ~retBlacklist) | retStop;
                 }
@@ -276,12 +279,12 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 // Fetch return address from top of stack
                 addr = (mem[sp+1] << 8) | mem[sp];
 
-                if (pc >= 0x4000 && sp < basesp)
-                    Log(level, pc-1, "RET to stacked data\n");
+                if (pc0 >= 0x4000 && sp < basesp)
+                    Log(level, pc0, "RET to stacked data\n");
                 else if (level == 0)
                 {
                     // Top-level is a special case and treated as a new entry point
-                    if (verbose) Log(level, pc-1, "RET to %s %s\n", AddrStr(addr), (level==0)?"(top-level)":"");
+                    if (verbose) Log(level, pc0, "RET to %s %s\n", AddrStr(addr), (level==0)?"(top-level)":"");
                     return trace_addr(addr, sp+2, sp+2, 0);
                 }
 
@@ -297,12 +300,12 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
 
 
             case 0xc5: case 0xd5: case 0xe5: case 0xf5: // push rr
-                if (verbose > 1) Log(level, pc-1-ddfd, "PUSH\n");
+                if (verbose > 1) Log(level, pc0, "PUSH\n");
                 sp -= 2;
                 break;
 
             case 0xc1: case 0xd1: case 0xe1: case 0xf1: // pop rr
-                if (verbose > 1) Log(level, pc-1-ddfd, "POP\n");
+                if (verbose > 1) Log(level, pc0, "POP\n");
 
                 // Pop with no data on the stack? (not top-level as stack state is unknown)
                 if (sp == basesp && level > 0)
@@ -313,16 +316,16 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                          (op == 0xd1 &&  mem[pc]         == 0x1a) || // pop de ; ld a,(de)
                          (op == 0xc1 &&  mem[pc]         == 0x0a)))  // pop bc ; ld a,(bc)
                     {
-                        if (pc >= 0x4000) Log(level, pc, "stopping at return address data access\n");
+                        if (pc >= 0x4000) Log(level, pc, "return address data access\n");
                         ret |= retBlacklist;
                     }
                     else if (ddfd && op == 0xe1) // pop ix/iy
                     {
                         for (WORD w = 0 ; w < 10 ; w++) // access must be within ~10 bytes
                         {
-                            if (mem[pc+w] == mem[pc-2] && (mem[pc+w+1] & 0xc7) == 0x46 && mem[pc+w+2] <= 0x01) // ld r,(ix/iy+0/1)
+                            if (mem[pc+w] == mem[pc0] && (mem[pc+w+1] & 0xc7) == 0x46 && mem[pc+w+2] <= 0x01) // ld r,(ix/iy+0/1)
                             {
-                                if (pc >= 0x4000) Log(level, pc+w, "stopping at return address data access\n");
+                                if (pc >= 0x4000) Log(level, pc+w, "return address data access\n");
                                 ret |= retBlacklist;
                             }
                         }
@@ -337,12 +340,12 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 break;
 
             case 0x33:  // inc sp
-                if (verbose > 1) Log(level, pc-1, "INC SP\n");
+                if (verbose > 1) Log(level, pc0, "INC SP\n");
                 sp++;
                 break;
 
             case 0x3b:  // dec sp
-                if (verbose > 1) Log(level, pc-1, "DEC SP\n");
+                if (verbose > 1) Log(level, pc0, "DEC SP\n");
                 sp--;
                 break;
 
@@ -354,8 +357,8 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 break;
 
             case 0x31:  // ld sp,nn
-                addr = (mem[pc+1] << 8) | mem[pc];
-                if (verbose > 1) Log(level, pc-1, "LD SP,%s\n", AddrStr(addr));
+                addr = (mem[pc0+2] << 8) | mem[pc0+1];
+                if (verbose > 1) Log(level, pc0, "LD SP,%s\n", AddrStr(addr));
                 basesp = sp;
             case 0x01: case 0x11: case 0x21: // ld rr,nn
             case 0x22: case 0x2a: case 0x32: case 0x3a: // ld (nn),hl ; ld hl,(nn) ; ld (nn),a ; ld a,(nn)
@@ -364,7 +367,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 break;
 
             case 0x40: case 0x49: case 0x52: case 0x5b: case 0x64: case 0x6d: case 0x7f: // ld r,r
-                Log(level, pc-1, "*** suspicious ld r,r ***\n");
+                Log(level, pc0, "*** suspicious ld r,r ***\n");
                 return ret;
         }
 
