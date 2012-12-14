@@ -94,7 +94,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
     // Loop until we reach an instruction location using the current mark
     while ((seen[pc] & (MARK_INSTR|mark)) != (MARK_INSTR|mark))
     {
-        if (verbose > 2 && !ddfd) Log(0, -1, "PC=%s SP=%s stacked=%d %s\n", AddrStr(pc), AddrStr(sp), int(basesp)-sp, (level==0)?"top-level":"");
+        if (verbose > 2 && !ddfd) Log(0, -1, "PC=%s [%02X %02X %02X %02X]  SP=%s stacked=%d  level=%d\n", AddrStr(pc), mem[pc], mem[pc+1], mem[pc+2], mem[pc+3], AddrStr(sp), int(basesp)-sp, level);
 
         // Start of instruction, 1 byte back if there's an index prefix
         pc0 = pc - ddfd;
