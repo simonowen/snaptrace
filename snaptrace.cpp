@@ -26,7 +26,7 @@ typedef unsigned char BYTE;
 typedef unsigned short WORD;
 
 // trace_addr return conditions
-enum { retOK=0x00, retStop=0x01, retBlacklist=0x02 };
+enum { retOK=0x00, retBlacklist=0x01 };
 
 WORD reg_pc, reg_sp;    // PC and SP from snapshot
 BYTE reg_i, reg_im;     // I and interrupt mode from snapshot
@@ -260,14 +260,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 {
                     if (pc >= 0x4000) Log(level, pc0, "blacklisted calls to %s\n", AddrStr(addr));
                     blacklist[addr] = 1;
-                    ret = (ret & ~retBlacklist) | retStop;
-                }
-
-                // Should we stop at the call?
-                if (ret & retStop)
-                {
-                    ret &= ~retStop;
-                    return ret;
+                    return ret & ~retBlacklist;
                 }
 
                 // Continue processing after CALL
@@ -332,7 +325,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                     }
 
                     // Report the return address pop unless we've detected a data access
-                    if (!(ret & retStop) && pc >= 0x4000) Log(level, pc-1-ddfd, "return address popped\n");
+                    if (!(ret & retBlacklist) && pc >= 0x4000) Log(level, pc-1-ddfd, "return address popped\n");
                 }
 
                 sp += 2;
