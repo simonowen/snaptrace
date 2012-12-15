@@ -162,11 +162,19 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
 
 
             case 0x00: // nop
-                if (pc0 >= 0x4000 && pc0 < (0xffff-MAX_NOP_RUN) && !memcmp(mem+pc0, mem+pc0+1, MAX_NOP_RUN-1))
+                if (pc0 >= 0x4000)
                 {
-                    Log(level, pc0, "*** suspicious block of %d+ NOPs ***\n", MAX_NOP_RUN);
-                    pc += MAX_NOP_RUN;
-                    if (!contsusp) return ret;
+                    int nops;
+
+                    // Count the run of NOPs, advancing PC past them as we go
+                    for (nops = 1 ; mem[pc] == 0x00 ; pc++, nops++);
+
+                    // Warn if there seem to be too many
+                    if (nops >= MAX_NOP_RUN)
+                    {
+                        Log(level, pc0, "*** suspicious block of %d NOPs ***\n", nops);
+                        if (!contsusp) return ret;
+                    }
                 }
                 break;
 

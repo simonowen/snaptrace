@@ -105,8 +105,8 @@ Information:
 
 Warnings:
 
- "*** suspicious block of 10+ NOPs ***"
-   A block of 10 or more NOPs have been encountered during the trace process.
+ "*** suspicious block of X NOPs ***"
+   A large block of X NOPs have been encountered during the trace process.
    Tracing has likely escaped into open/unused memory!
 
  "*** suspicious LD r,r ***"
