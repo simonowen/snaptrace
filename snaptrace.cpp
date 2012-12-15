@@ -171,13 +171,14 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 break;
 
             case 0xe3: // ex (sp),hl/ix/iy
-                if (verbose > 1) Log(level, pc0, "EX (SP),%s\n", ddfd?"IX/IY":"HL");
-
                 if (sp == basesp) // pointing to return adddress?
                 {
-                    if (pc >= 0x4000) Log(level, pc0, "stopping at EX (SP) on return address\n");
-                    return retBlacklist;
+                    if (pc >= 0x4000) Log(level, pc0, "EX (SP),%s on return address\n", ddfd?"IX/IY":"HL");
+                    ret |= retBlacklist;
                 }
+                else if (verbose > 1)
+                    Log(level, pc0, "EX (SP),%s\n", ddfd?"IX/IY":"HL");
+
                 break;
 
             case 0x34: case 0x35:   // inc/dec (ix+d)
