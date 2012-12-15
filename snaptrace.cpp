@@ -643,7 +643,7 @@ void write_png (const char *filename)
         png_set_IHDR(png, info, 256, 256-savemsb, 8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
 
         png_color palette[256] = {
-            {0,0,0}, {0,0,224}, {224,0,0}, {224,0,224}, {0,224,0}, {0,224,224}, {224,224,0}, {224,224,224},
+            {0,0,0}, {64,64,255}, {255,64,64}, {255,64,255}, {64,255,64}, {64,255,255}, {255,255,64}, {255,255,255},
             {0,0,0}, {64,64,255}, {255,64,64}, {255,64,255}, {64,255,64}, {64,255,255}, {255,255,64}, {255,255,255}
         };
         png_set_PLTE(png, info, palette, 16);
