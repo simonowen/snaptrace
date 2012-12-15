@@ -47,6 +47,7 @@ bool pngsave = true;    // save output as PNG image (enabled, -s to disable)
 bool mapsave = false;   // save code bitmap (disabled, -m to enable)
 bool instrmap = false;  // only include z80 instruction start in map (disabled, -z to enable)
 bool decaddr = false;   // output addresses in decimal (disabled, -d to enable)
+bool contsusp = false;  // continue after suspicious code (disabled, -c to enable)
 
 
 const char *AddrStr (WORD addr)
@@ -164,7 +165,8 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 if (pc0 >= 0x4000 && pc0 < (0xffff-MAX_NOP_RUN) && !memcmp(mem+pc0, mem+pc0+1, MAX_NOP_RUN-1))
                 {
                     Log(level, pc0, "*** suspicious block of %d+ NOPs ***\n", MAX_NOP_RUN);
-                    return ret;
+                    pc += MAX_NOP_RUN;
+                    if (!contsusp) return ret;
                 }
                 break;
 
@@ -361,8 +363,12 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 break;
 
             case 0x40: case 0x49: case 0x52: case 0x5b: case 0x64: case 0x6d: case 0x7f: // ld r,r
-                Log(level, pc0, "*** suspicious ld r,r ***\n");
-                return ret;
+            {
+                static const char *regs = "BCDEHL-A";
+                Log(level, pc0, "*** suspicious LD %c,%c ***\n", regs[op&7], regs[op&7]);
+                if (!contsusp) return ret;
+                break;
+            }
         }
 
         ddfd = false;
@@ -703,6 +709,7 @@ int main (int argc, char *argv[])
                 switch (*p)
                 {
                     case 'b': basictrace = false; break; // skip BASIC scan for USRs
+                    case 'c': contsusp = true; break;    // continue after suspicious code
                     case 'd': decaddr = true; break;     // output addresses in decimal
                     case 'i': im2trace = false; break;   // skip IM 2 trace
                     case 'm': mapsave = true; break;     // save code bitmap
@@ -729,7 +736,7 @@ int main (int argc, char *argv[])
 
     if (!file)
     {
-        fprintf(stderr, "Usage: %s [-bdimrsvz] <snapshot>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-bcdimrsvz] <snapshot>\n", argv[0]);
         return 1;
     }
     else if (!read_rom("48.rom") && !read_rom(ROM_DIR "48.rom"))

@@ -32,9 +32,10 @@ Or if you have the CMake build system installed, use:
 Running
 -------
 
-  Usage: snaptrace [-bdimrsvz] <snapshot>
+  Usage: snaptrace [-bcdimrsvz] <snapshot>
 
     -b   Skip scanning BASIC for USR code entry points
+    -c   Continue trace beyond suspicious code
     -d   Show addresses in decimal rather than hex
     -i   Skip tracing IM 2 handler, even if in IM 2 mode
     -m   Save code bitmap to .map file
@@ -108,7 +109,7 @@ Warnings:
    A block of 10 or more NOPs have been encountered during the trace process.
    Tracing has likely escaped into open/unused memory!
 
- "*** suspicious ld r,r ***"
+ "*** suspicious LD r,r ***"
    An inert assignment with the same source and target register was found.
    Tracing has likely escaped and is executing data!
 
