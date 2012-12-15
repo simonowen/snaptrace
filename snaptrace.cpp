@@ -33,7 +33,7 @@ BYTE reg_i, reg_im;     // I and interrupt mode from snapshot
 
 BYTE poss_i, poss_im;   // possible I and IM values in the code
 
-BYTE mem[0x10000];      // 64K address space, first 16K ROM
+BYTE mem[0x10010];      // 64K address space, plus 16 bytes of wrapping space
 BYTE seen[0x10000];     // code locations visited
 BYTE blacklist[0x10000];// blacklisted calls due to stack manipulation
 BYTE mark;              // current marker colour bit to combine into seen[pc]
@@ -547,6 +547,9 @@ bool read_rom (const char *romfile)
     {
         datalen = fread(mem, 1, 0x4000, f);
         fclose(f);
+
+        // Duplicate start of ROM at the end to simplify wrapped accesses
+        memcpy(mem+0x10000, mem, sizeof(mem)-0x10000);
     }
 
     return f != NULL && datalen == 0x4000;
