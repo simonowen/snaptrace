@@ -145,7 +145,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                         break;
 
                     case 0x47: // ld i,a
-                        if (mem[pc0-2] == 0x3e/*ld a,n*/ && mem[pc0-1] > 0x40)
+                        if (mem[pc0-2] == 0x3e/*ld a,n*/ && mem[pc0-1] > 0x39)
                         {
                             poss_i = mem[pc0-1];
                             if (verbose > 1) Log(level, pc0-2, "LD A,%02X ; LD I,A\n", poss_i);
@@ -528,7 +528,7 @@ void trace_im2 (BYTE i)
     WORD im_addr = (mem[im_table+255] << 8) | mem[im_table+256];
 
     // Sanity check to support runtime IM 2 detection
-    if (i >= 0x40 && im_addr >= 0x4000 && (im_addr >> 8) == (im_addr & 0xff))
+    if (i >= 0x39 && im_addr >= 0x4000 && (im_addr >> 8) == (im_addr & 0xff))
     {
         printf("Tracing IM 2 from %s\n", AddrStr(im_addr));
 
