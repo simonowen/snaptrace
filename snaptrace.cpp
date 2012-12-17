@@ -20,6 +20,8 @@
 #define MARK_PC    0x04 // bit for code traced from snapshot PC
 #define MARK_INSTR 0x08 // bit indicating start of z80 instruction
 #define MARK_BASIC 0x10 // bit for BASIC program areas
+#define MARK_COPY  0x20 // bit for target of data/code copy
+#define MARK_Z80   0x07 // bits indicating Z80 code
 
 #define PROG   0x5c53   // contains address of BASIC program
 #define VARS   0x5c4b   // contains address of BASIC variables
@@ -87,6 +89,7 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
     WORD pc0, addr;
     BYTE op;
     bool ddfd = false;
+    int reg_bc = -1, reg_de = -1;   // only tracked between code junctions
     int ret = retOK;
 
     // Continuing beyond ROM loader is unsafe as it may rely on loaded code
@@ -100,6 +103,13 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
     while ((seen[pc] & (MARK_INSTR|mark)) != (MARK_INSTR|mark))
     {
         if (verbose > 2 && !ddfd) Log(0, -1, "PC=%s [%02X %02X %02X %02X]  SP=%s stacked=%d  level=%d\n", AddrStr(pc), mem[pc], mem[pc+1], mem[pc+2], mem[pc+3], AddrStr(sp), int(basesp)-sp, level);
+
+        // Check for the target of a LDIR/LDDR
+        if (seen[pc] & MARK_COPY)
+        {
+            Log(level, pc, "stopping at copied code\n");
+            break;
+        }
 
         // Start of instruction, 1 byte back if there's an index prefix
         pc0 = pc - ddfd;
@@ -160,6 +170,36 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                     case 0x5e: // im 2
                         if (verbose > 1) Log(level, pc0, "IM 2\n");
                         poss_im = 2;
+                        break;
+
+                    case 0xb0: // ldir
+                        // Sensible target and length?
+                        if (reg_de >= 0x4000 && reg_bc > 0)
+                        {
+                            if (verbose > 1) Log(level, pc0, "LDIR target %s-%s\n", AddrStr(reg_de), AddrStr(reg_de+reg_bc-1));
+
+                            for (int i = reg_de ; i < reg_de+reg_bc && i < 0x10000 ; i++)
+                                seen[i] |= MARK_COPY;
+
+                            // Update registers for instruction
+                            reg_de += reg_bc;
+                            reg_bc = 0;
+                        }
+                        break;
+
+                    case 0xb8: // lddr
+                        // Sensible target and length?
+                        if (reg_de >= 0x4000 && reg_bc > 0)
+                        {
+                            if (verbose > 1) Log(level, pc0, "LDDR target %s-%s\n", AddrStr(reg_de-reg_bc+1), AddrStr(reg_de));
+
+                            for (int i = reg_de ; i > reg_de-reg_bc && i > 0 ; i--)
+                                seen[i] |= MARK_COPY;
+
+                            // Update registers for instruction
+                            reg_de -= reg_bc;
+                            reg_bc = 0;
+                        }
                         break;
                 }
                 break;
@@ -370,6 +410,11 @@ int trace_addr (WORD pc, WORD sp, WORD basesp, int level)
                 if (verbose > 1) Log(level, pc0, "LD SP,%s\n", AddrStr(addr));
                 basesp = sp;
             case 0x01: case 0x11: case 0x21: // ld rr,nn
+                switch (op)
+                {
+                    case 0x01: reg_bc = (mem[pc+1] << 8) | mem[pc]; break;
+                    case 0x11: reg_de = (mem[pc+1] << 8) | mem[pc]; break;
+                }
             case 0x22: case 0x2a: case 0x32: case 0x3a: // ld (nn),hl ; ld hl,(nn) ; ld (nn),a ; ld a,(nn)
                 seen[pc++] |= mark;
                 seen[pc++] |= mark;
@@ -792,7 +837,7 @@ int main (int argc, char *argv[])
 
     int codelen = 0;
     for (size_t i = 0x4000 ; i < sizeof(seen) ; i++)
-        if (seen[i] & ~MARK_BASIC) codelen++;
+        if (seen[i] & MARK_Z80) codelen++;
 
     if (basictrace)
         printf("Traced %d Z80 bytes, BASIC length %d.\n", codelen, basiclen);
