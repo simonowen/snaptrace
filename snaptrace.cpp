@@ -15,7 +15,11 @@
 
 #define MAX_NOP_RUN 10  // Allow up to 10 NOPs before we suspect we're in free memory
 
-#define MARK_INSTR 0x08 // seen[] bit indicating start of z80 instruction
+#define MARK_IM2   0x01 // seen[] bit for code traced from IM 2 handler
+#define MARK_USR   0x02 // bit for code traced from BASIC USR statement
+#define MARK_PC    0x04 // bit for code traced from snapshot PC
+#define MARK_INSTR 0x08 // bit indicating start of z80 instruction
+#define MARK_BASIC 0x10 // bit for BASIC program areas
 
 #define PROG   0x5c53   // contains address of BASIC program
 #define VARS   0x5c4b   // contains address of BASIC variables
@@ -455,7 +459,7 @@ void trace_line (WORD addr, int len, int line)
                 else
                     printf("Found USR VAL$ %s on line %u\n", AddrStr(addr), line);
 
-                mark = 2; // red
+                mark = MARK_USR; // red
                 trace_safe(addr, reg_sp);
             }
         }
@@ -478,7 +482,7 @@ void trace_line (WORD addr, int len, int line)
                 else
                     printf("Found USR %s on line %u\n", AddrStr(addr), line);
 
-                mark = 2; // red
+                mark = MARK_USR; // red
                 trace_safe(addr, reg_sp);
 
                 // Step back so the number token is seen and skipped
@@ -491,8 +495,8 @@ void trace_line (WORD addr, int len, int line)
     if (line >= 0) addr -= 4;
     basiclen += i-addr+1;
 
-    // Mark the BASIC program in whitee
-    mark = 7; // white
+    // Mark the BASIC program area
+    mark = MARK_BASIC;
     while (addr <= i)
         seen[addr++] |= mark;
 }
@@ -547,7 +551,7 @@ void trace_im2 (BYTE i)
     {
         printf("Tracing IM 2 from %s\n", AddrStr(im_addr));
 
-        mark = 1; // blue
+        mark = MARK_IM2; // blue
         trace_safe(im_addr, reg_sp);
     }
 }
@@ -644,6 +648,8 @@ void write_png (const char *filename)
     FILE *f = fopen(buf, "wb");
     if (f)
     {
+        int i;
+
         png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
         png_infop info = png_create_info_struct(png);
         png_init_io(png, f);
@@ -651,16 +657,21 @@ void write_png (const char *filename)
         png_set_IHDR(png, info, 256, 256-savemsb, 8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
 
         png_color palette[256] = {
-            {0,0,0}, {64,64,255}, {255,64,64}, {255,64,255}, {64,255,64}, {64,255,255}, {255,255,64}, {255,255,255},
             {0,0,0}, {64,64,255}, {255,64,64}, {255,64,255}, {64,255,64}, {64,255,255}, {255,255,64}, {255,255,255}
         };
-        png_set_PLTE(png, info, palette, 16);
+        png_set_PLTE(png, info, palette, 8);
 
         png_write_info(png, info);
 
+        // Build pixel entries, white for BASIC, 3-bit trace colour for the rest
+        BYTE img[0x10000];
+        for (i = 0 ; i < sizeof(img) ; i++)
+            img[i] = (seen[i] == MARK_BASIC) ? 7 : seen[i] & 0x07;
+
+        // Build list of row starts for libpng writing
         BYTE *rows[256];
-        for (int i = savemsb ; i < 256 ; i++)
-            rows[i-savemsb] = &seen[i*256];
+        for (i = savemsb ; i < 256 ; i++)
+            rows[i-savemsb] = &img[i*256];
 
         png_write_image(png, rows);
         png_write_end(png, NULL);
@@ -757,7 +768,7 @@ int main (int argc, char *argv[])
         return 1;
 
     // Trace from PC in snapshot
-    mark = 4; // green
+    mark = MARK_PC; // green
     trace_addr(reg_pc, reg_sp, reg_sp, 0); // top-level, ret allowed
 
     // Trace using USR statements in BASIC and the current editing line
@@ -779,14 +790,14 @@ int main (int argc, char *argv[])
     if (mapsave)
         write_map(file);
 
-    int n = 0;
+    int codelen = 0;
     for (size_t i = 0x4000 ; i < sizeof(seen) ; i++)
-        n += seen[i] != 0;
+        if (seen[i] & ~MARK_BASIC) codelen++;
 
     if (basictrace)
-        printf("Traced %d Z80 bytes, BASIC length %d.\n", n-basiclen, basiclen);
+        printf("Traced %d Z80 bytes, BASIC length %d.\n", codelen, basiclen);
     else
-        printf("Traced %d Z80 bytes.\n", n);
+        printf("Traced %d Z80 bytes.\n", codelen);
 
     return 0;
 }
